@@ -44,7 +44,7 @@ def find_valid_item():
             return (x, y)
     return None
 
-def focus_game_window(window_keyword='Grow'):
+def focus_game_window(window_keyword):
     if platform.system() == "Darwin":
         script = f'''
         tell application "System Events"
@@ -66,7 +66,7 @@ def focus_game_window(window_keyword='Grow'):
             pass
         return False
 
-def run_bot(status_label, window):
+def run_bot(status_label, window, window_keyword):
     global bot_running
     while bot_running and not bot_stop_event.is_set():
         print(f"👉 Using START_X={START_X}, START_Y={START_Y}")
@@ -90,7 +90,7 @@ def run_bot(status_label, window):
                 status_label.setText(f"Waiting {WAIT_TIME - i}s...")
                 time.sleep(1)
 
-            focus_game_window()
+            focus_game_window(window_keyword)
             pyautogui.click()
             print("👇Pressed E to extract the honey")
             pyautogui.press('e')
@@ -110,19 +110,19 @@ def run_bot(status_label, window):
                 status_label.setText(f"No item. Retrying in {i}s...")
                 time.sleep(1)
 
-def delayed_start(status_label, window, start_button, pick_button, stop_button):
+def delayed_start(status_label, window, start_button, pick_button, stop_button, window_keyword):
     for i in range(5, 0, -1):
         status_label.setText(f"Bot starting in {i}s...")
         time.sleep(1)
     window.hide()
-    run_bot(status_label, window)
+    run_bot(status_label, window, window_keyword)
 
 # === GUI ===
 class BotWindow(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Grow Garden Honey Bot")
-        self.setFixedSize(360, 240)
+        self.setFixedSize(360, 280)
 
         global START_X, START_Y
 
@@ -136,6 +136,11 @@ class BotWindow(QtWidgets.QWidget):
         
         self.status_label = QtWidgets.QLabel("Status: Waiting to start...", self)
         self.status_label.setStyleSheet("color: blue;")
+
+        # Window keyword input
+        self.keyword_label = QtWidgets.QLabel("Game Window Keyword:", self)
+        self.keyword_input = QtWidgets.QLineEdit(self)
+        self.keyword_input.setText("Grow")
 
         # Buttons
         self.pick_button = QtWidgets.QPushButton("📌 Pick Item Position", self)
@@ -153,6 +158,8 @@ class BotWindow(QtWidgets.QWidget):
         layout.addWidget(self.title_label)
         layout.addWidget(self.coord_label)
         layout.addWidget(self.status_label)
+        layout.addWidget(self.keyword_label)
+        layout.addWidget(self.keyword_input)
         layout.addWidget(self.pick_button)
         layout.addWidget(self.start_button)
         layout.addWidget(self.stop_button)
@@ -196,9 +203,18 @@ class BotWindow(QtWidgets.QWidget):
 
             self.raise_()
             QtCore.QTimer.singleShot(500, self.raise_)
-            QtCore.QTimer.singleShot(1000, focus_game_window)
 
-            threading.Thread(target=delayed_start, args=(self.status_label, self, self.start_button, self.pick_button, self.stop_button), daemon=True).start()
+            window_keyword = self.keyword_input.text().strip()
+            if not window_keyword:
+                window_keyword = "Grow"
+
+            QtCore.QTimer.singleShot(1000, lambda: focus_game_window(window_keyword))
+
+            threading.Thread(
+                target=delayed_start,
+                args=(self.status_label, self, self.start_button, self.pick_button, self.stop_button, window_keyword),
+                daemon=True
+            ).start()
 
     def stop_bot(self):
         global bot_running, bot_stop_event
