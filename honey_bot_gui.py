@@ -4,10 +4,10 @@ import threading
 import platform
 import subprocess
 import pyautogui
-from pynput import mouse
 from PIL import ImageGrab
 import numpy as np
 from PyQt5 import QtWidgets, QtCore
+from PyQt5.QtCore import pyqtSignal
 
 # === BOT CONFIG ===
 START_X, START_Y = 560, 740
@@ -119,6 +119,7 @@ def delayed_start(status_label, window, start_button, pick_button, stop_button, 
 
 # === GUI ===
 class BotWindow(QtWidgets.QWidget):
+    update_status_signal = pyqtSignal(str)
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Grow Garden Honey Bot")
@@ -164,26 +165,65 @@ class BotWindow(QtWidgets.QWidget):
         layout.addWidget(self.start_button)
         layout.addWidget(self.stop_button)
         self.setLayout(layout)
+        
+        self.update_status_signal.connect(self.status_label.setText)
 
     def pick_position(self):
         global START_X, START_Y, position_selected
-        self.hide()
-        print("👆 Click to set the start position")
 
-        def on_click(x, y, button, pressed):
-            global START_X, START_Y, position_selected
-            if pressed:
-                START_X, START_Y = x, y
-                position_selected = True
-                self.coord_label.setText(f"Start Position: ({START_X}, {START_Y})")
-                print(f"✅ Picked: ({START_X}, {START_Y})")
-                self.showNormal()
-                self.raise_()
-                listener.stop()
+        class OverlayWindow(QtWidgets.QWidget):
+            def __init__(self, parent):
+                super().__init__()
+                self.parent = parent
+                self.setWindowFlags(
+                    QtCore.Qt.FramelessWindowHint |
+                    QtCore.Qt.WindowStaysOnTopHint |
+                    QtCore.Qt.Tool
+                )
+                self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
+
+                # Combine all screen geometries into one bounding QRect
+                screens = QtWidgets.QApplication.screens()
+                desktop_rect = screens[0].geometry()
+                for screen in screens[1:]:
+                    desktop_rect = desktop_rect.united(screen.geometry())
+
+                self.setGeometry(desktop_rect)
+
+                self.setStyleSheet("background-color: rgba(0, 0, 0, 50);")
+
+                label = QtWidgets.QLabel("Click anywhere to pick the position", self)
+                label.setStyleSheet("color: white; font-size: 24px; background-color: rgba(0, 0, 0, 128);")
+                label.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
+                label.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+
+                layout = QtWidgets.QVBoxLayout(self)
+                layout.setContentsMargins(0, 0, 0, 0)
+                layout.addWidget(label)
+
+                self.installEventFilter(self)
+
+            def eventFilter(self, obj, event):
+                if event.type() == QtCore.QEvent.MouseButtonPress:
+                    global START_X, START_Y, position_selected
+                    pos = event.globalPos()
+                    print("Mouse press event triggered")
+                    START_X = pos.x()
+                    START_Y = pos.y()
+                    position_selected = True
+                    print(f"✅ Picked: ({START_X}, {START_Y})")
+                    self.parent.coord_label.setText(f"Start Position: ({START_X}, {START_Y})")
+                    self.parent.showNormal()
+                    self.parent.raise_()
+                    self.close()
+                    return True
                 return False
 
-        listener = mouse.Listener(on_click=on_click)
-        listener.start()
+        self.hide()
+        self.overlay = OverlayWindow(self)
+        self.overlay.show()
+        self.overlay.raise_()
+
 
     def start_bot(self):
         global bot_running, bot_stop_event, position_selected
