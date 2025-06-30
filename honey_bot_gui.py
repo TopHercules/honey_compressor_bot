@@ -26,11 +26,15 @@ position_selected = False
 
 # === CORE LOGIC ===
 def has_red_pixel(region):
-    img = ImageGrab.grab(bbox=region)
-    img_np = np.array(img)
-    r, g, b = img_np[:, :, 0], img_np[:, :, 1], img_np[:, :, 2]
-    red_mask = (r > 200) & (g < 80) & (b < 80)
-    return np.any(red_mask)
+    try:
+        img = ImageGrab.grab(bbox=region)
+        img_np = np.array(img)
+        r, g, b = img_np[:, :, 0], img_np[:, :, 1], img_np[:, :, 2]
+        red_mask = (r > 200) & (g < 80) & (b < 80)
+        return np.any(red_mask)
+    except Exception as e:
+        print(f"Error capturing screen region: {e}")
+        return False
 
 def find_valid_item():
     global START_X, START_Y
