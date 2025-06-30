@@ -66,49 +66,55 @@ def focus_game_window(window_keyword):
             pass
         return False
 
-def run_bot(status_label, window, window_keyword):
+def run_bot(status_label, window):
     global bot_running
     while bot_running and not bot_stop_event.is_set():
-        print(f"👉 Using START_X={START_X}, START_Y={START_Y}")
-        item_pos = find_valid_item()
-        if item_pos:
-            status_label.setText("Clicking item and pressing E...")
-            pyautogui.click(item_pos)
-            time.sleep(0.3)
-            print("👇Pressed E to give plant")
-            pyautogui.press('e')
+        try:
+            print(f"👉 Using START_X={START_X}, START_Y={START_Y}")
+            item_pos = find_valid_item()
+            if item_pos:
+                status_label.setText("Clicking item and pressing E...")
+                pyautogui.click(item_pos)
+                time.sleep(0.3)
+                print("👇Pressed E to give plant")
+                pyautogui.press('e')
 
-            window.showNormal()
-            window.raise_()
-            window.activateWindow()
-            QtCore.QThread.msleep(500)
+                window.showNormal()
+                window.raise_()
+                window.activateWindow()
+                QtCore.QThread.msleep(500)
 
-            for i in range(WAIT_TIME):
+                for i in range(WAIT_TIME):
+                    if bot_stop_event.is_set():
+                        status_label.setText("Bot stopped.")
+                        return
+                    status_label.setText(f"Waiting {WAIT_TIME - i}s...")
+                    time.sleep(1)
+
+                focus_game_window()
+                pyautogui.click()
+                print("👇Pressed E to extract the honey")
+                pyautogui.press('e')
+
                 if bot_stop_event.is_set():
                     status_label.setText("Bot stopped.")
                     return
-                status_label.setText(f"Waiting {WAIT_TIME - i}s...")
+
+                window.hide()
+                status_label.setText("Cycle complete. Restarting...")
                 time.sleep(1)
-
-            focus_game_window(window_keyword)
-            pyautogui.click()
-            print("👇Pressed E to extract the honey")
-            pyautogui.press('e')
-
-            if bot_stop_event.is_set():
-                status_label.setText("Bot stopped.")
-                return
-
-            window.hide()
-            status_label.setText("Cycle complete. Restarting...")
-            time.sleep(1)
-        else:
-            for i in range(10, 0, -1):
-                if bot_stop_event.is_set():
-                    status_label.setText("Bot stopped.")
-                    return
-                status_label.setText(f"No item. Retrying in {i}s...")
-                time.sleep(1)
+            else:
+                for i in range(10, 0, -1):
+                    if bot_stop_event.is_set():
+                        status_label.setText("Bot stopped.")
+                        return
+                    status_label.setText(f"No item. Retrying in {i}s...")
+                    time.sleep(1)
+        except Exception as e:
+            print(f"Error in run_bot loop: {e}")
+            bot_running = False
+            status_label.setText(f"Error occurred: {e}")
+            return
 
 def delayed_start(status_label, window, start_button, pick_button, stop_button, window_keyword):
     for i in range(5, 0, -1):
