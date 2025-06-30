@@ -1,22 +1,20 @@
-import pyautogui
+import sys
 import time
 import threading
-import tkinter as tk
+import platform
+import subprocess
+import pyautogui
 from pynput import mouse
 from PIL import ImageGrab
 import numpy as np
-import pygetwindow as gw
-import platform
-import subprocess
+from PyQt5 import QtWidgets, QtCore
 
 # === BOT CONFIG ===
 START_X, START_Y = 560, 740
 
-# Adjust item size based on screen resolution
 screen_width, screen_height = pyautogui.size()
 ITEM_WIDTH = int(65 * screen_width / 1920)
 ITEM_HEIGHT = int(65 * screen_height / 1080)
-
 ITEMS_PER_ROW = 10
 MAX_ITEMS = 40
 WAIT_TIME = 30
@@ -59,18 +57,14 @@ def focus_game_window(window_keyword='Grow'):
         except subprocess.CalledProcessError:
             return False
     else:
-        # Fallback for Windows (if run cross-platform)
-        import pygetwindow as gw
-        for w in gw.getWindowsWithTitle(window_keyword):
-            try:
+        try:
+            import pygetwindow as gw
+            for w in gw.getWindowsWithTitle(window_keyword):
                 w.activate()
                 return True
-            except:
-                pass
+        except:
+            pass
         return False
-
-def update_status(label, text):
-    label.after(0, lambda: label.config(text=text))
 
 def run_bot(status_label, window):
     global bot_running
@@ -78,147 +72,154 @@ def run_bot(status_label, window):
         print(f"👉 Using START_X={START_X}, START_Y={START_Y}")
         item_pos = find_valid_item()
         if item_pos:
-            update_status(status_label, "Clicking item and pressing E...")
+            status_label.setText("Clicking item and pressing E...")
             pyautogui.click(item_pos)
             time.sleep(0.3)
             print("👇Pressed E to give plant")
             pyautogui.press('e')
 
-            window.deiconify()
-            window.lift()
-            window.attributes('-topmost', True)
-            window.after(500, lambda: window.attributes('-topmost', False))
+            window.showNormal()
+            window.raise_()
+            window.activateWindow()
+            QtCore.QThread.msleep(500)
 
             for i in range(WAIT_TIME):
                 if bot_stop_event.is_set():
-                    update_status(status_label, "Bot stopped.")
+                    status_label.setText("Bot stopped.")
                     return
-                update_status(status_label, f"Waiting {WAIT_TIME - i}s...")
+                status_label.setText(f"Waiting {WAIT_TIME - i}s...")
                 time.sleep(1)
-            
-            focus_game_window()  # focus again before pressing E
+
+            focus_game_window()
             pyautogui.click()
             print("👇Pressed E to extract the honey")
             pyautogui.press('e')
 
             if bot_stop_event.is_set():
-                update_status(status_label, "Bot stopped.")
+                status_label.setText("Bot stopped.")
                 return
 
-            window.withdraw()
-            update_status(status_label, "Cycle complete. Restarting...")
+            window.hide()
+            status_label.setText("Cycle complete. Restarting...")
             time.sleep(1)
         else:
             for i in range(10, 0, -1):
                 if bot_stop_event.is_set():
-                    update_status(status_label, "Bot stopped.")
+                    status_label.setText("Bot stopped.")
                     return
-                update_status(status_label, f"No item. Retrying in {i}s...")
+                status_label.setText(f"No item. Retrying in {i}s...")
                 time.sleep(1)
 
-def start_bot(status_label, window, start_button, pick_button, stop_button):
-    global bot_running, bot_stop_event, position_selected
-
-    if not position_selected:
-        update_status(status_label, "⚠️ Please pick a position first.")
-        return
-
-    if not bot_running:
-        bot_running = True
-        bot_stop_event.clear()
-        update_status(status_label, "Bot starting in 5s...")
-
-        start_button.pack_forget()
-        pick_button.pack_forget()
-        stop_button.pack(pady=5)
-
-        window.lift()
-        window.attributes('-topmost', True)
-        window.after(500, lambda: window.attributes('-topmost', False))
-        window.after(1000, focus_game_window)
-
-        threading.Thread(target=delayed_start, args=(status_label, window), daemon=True).start()
-
-def delayed_start(status_label, window):
+def delayed_start(status_label, window, start_button, pick_button, stop_button):
     for i in range(5, 0, -1):
-        update_status(status_label, f"Bot starting in {i}s...")
+        status_label.setText(f"Bot starting in {i}s...")
         time.sleep(1)
-    window.withdraw()
+    window.hide()
     run_bot(status_label, window)
 
-def stop_bot(status_label, start_button, pick_button, stop_button, window):
-    global bot_running, bot_stop_event
-    bot_running = False
-    bot_stop_event.set()
-    update_status(status_label, "Bot stopped.")
+# === GUI ===
+class BotWindow(QtWidgets.QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Grow Garden Honey Bot")
+        self.setFixedSize(360, 240)
 
-    start_button.pack(pady=5)
-    pick_button.pack(pady=5)
-    stop_button.pack_forget()
+        global START_X, START_Y
 
-    window.deiconify()
-    window.lift()
+        # Labels
+        self.title_label = QtWidgets.QLabel("🍯 Honey Compressor Bot", self)
+        self.title_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        
+        self.coord_label = QtWidgets.QLabel(f"Start Position: ({START_X}, {START_Y})", self)
+        self.coord_label.setStyleSheet("color: green;")
+        
+        self.status_label = QtWidgets.QLabel("Status: Waiting to start...", self)
+        self.status_label.setStyleSheet("color: blue;")
 
-def pick_position(coord_label, window):
-    global START_X, START_Y, position_selected
+        # Buttons
+        self.pick_button = QtWidgets.QPushButton("📌 Pick Item Position", self)
+        self.pick_button.clicked.connect(self.pick_position)
 
-    def on_click(x, y, button, pressed):
+        self.start_button = QtWidgets.QPushButton("▶ Start Bot", self)
+        self.start_button.clicked.connect(self.start_bot)
+
+        self.stop_button = QtWidgets.QPushButton("▣ Stop Bot", self)
+        self.stop_button.clicked.connect(self.stop_bot)
+        self.stop_button.hide()
+
+        # Layout
+        layout = QtWidgets.QVBoxLayout()
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.coord_label)
+        layout.addWidget(self.status_label)
+        layout.addWidget(self.pick_button)
+        layout.addWidget(self.start_button)
+        layout.addWidget(self.stop_button)
+        self.setLayout(layout)
+
+    def pick_position(self):
         global START_X, START_Y, position_selected
-        if pressed:
-            START_X, START_Y = x, y
-            position_selected = True
-            coord_label.config(text=f"Start Position: ({START_X}, {START_Y})")
-            print(f"✅ Picked: ({START_X}, {START_Y})")
+        self.hide()
+        print("👆 Click to set the start position")
 
-            window.deiconify()
-            window.lift()
-            window.attributes('-topmost', True)
-            window.after(100, lambda: window.attributes('-topmost', False))
+        def on_click(x, y, button, pressed):
+            global START_X, START_Y, position_selected
+            if pressed:
+                START_X, START_Y = x, y
+                position_selected = True
+                self.coord_label.setText(f"Start Position: ({START_X}, {START_Y})")
+                print(f"✅ Picked: ({START_X}, {START_Y})")
+                self.showNormal()
+                self.raise_()
+                listener.stop()
+                return False
 
-            listener.stop()
-            return False
+        listener = mouse.Listener(on_click=on_click)
+        listener.start()
 
-    window.withdraw()
-    print("👆 Click to set the start position")
-    listener = mouse.Listener(on_click=on_click)
-    listener.start()
+    def start_bot(self):
+        global bot_running, bot_stop_event, position_selected
 
-def create_gui():
-    window = tk.Tk()
-    window.title("Grow Garden Honey Bot")
-    window.geometry("360x240")
-    window.resizable(False, False)
+        if not position_selected:
+            self.status_label.setText("⚠️ Please pick a position first.")
+            return
 
-    title_label = tk.Label(window, text="🍯 Honey Compressor Bot", font=("Arial", 14, "bold"))
-    title_label.pack(pady=10)
+        if not bot_running:
+            bot_running = True
+            bot_stop_event.clear()
+            self.status_label.setText("Bot starting in 5s...")
 
-    coord_label = tk.Label(window, text=f"Start Position: ({START_X}, {START_Y})", fg="green")
-    coord_label.pack(pady=2)
+            self.start_button.hide()
+            self.pick_button.hide()
+            self.stop_button.show()
 
-    status_label = tk.Label(window, text="Status: Waiting to start...", fg="blue")
-    status_label.pack(pady=5)
+            self.raise_()
+            QtCore.QTimer.singleShot(500, self.raise_)
+            QtCore.QTimer.singleShot(1000, focus_game_window)
 
-    pick_button = tk.Button(window, text="📌 Pick Item Position", width=25)
-    pick_button.config(command=lambda: pick_position(coord_label, window))
-    pick_button.pack(pady=5)
+            threading.Thread(target=delayed_start, args=(self.status_label, self, self.start_button, self.pick_button, self.stop_button), daemon=True).start()
 
-    stop_button = tk.Button(window, text="▣ Stop Bot", width=25)
-    stop_button.config(command=lambda: stop_bot(status_label, start_button, pick_button, stop_button, window))
+    def stop_bot(self):
+        global bot_running, bot_stop_event
+        bot_running = False
+        bot_stop_event.set()
+        self.status_label.setText("Bot stopped.")
 
-    def start_bot_callback():
-        start_bot(status_label, window, start_button, pick_button, stop_button)
+        self.start_button.show()
+        self.pick_button.show()
+        self.stop_button.hide()
 
-    start_button = tk.Button(window, text="▶ Start Bot", width=25)
-    start_button.config(command=start_bot_callback)
-    start_button.pack(pady=5)
+        self.showNormal()
+        self.raise_()
 
-    def on_close():
-        stop_bot(status_label, start_button, pick_button, stop_button, window)
-        window.destroy()
-
-    window.protocol("WM_DELETE_WINDOW", on_close)
-    window.mainloop()
+    def closeEvent(self, event):
+        self.stop_bot()
+        event.accept()
 
 # === RUN ===
 if __name__ == "__main__":
-    create_gui()
+    app = QtWidgets.QApplication(sys.argv)
+    window = BotWindow()
+    window.show()
+    sys.exit(app.exec_())
