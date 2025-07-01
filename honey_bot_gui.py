@@ -24,7 +24,6 @@ bot_running = False
 bot_stop_event = threading.Event()
 position_selected = False
 
-# === CORE LOGIC ===
 def has_red_pixel(region):
     try:
         img = ImageGrab.grab(bbox=region)
@@ -70,66 +69,12 @@ def focus_game_window(window_keyword):
             pass
         return False
 
-def run_bot(status_label, window):
-    global bot_running
-    while bot_running and not bot_stop_event.is_set():
-        try:
-            print(f"👉 Using START_X={START_X}, START_Y={START_Y}")
-            item_pos = find_valid_item()
-            if item_pos:
-                status_label.setText("Clicking item and pressing E...")
-                pyautogui.click(item_pos)
-                time.sleep(0.3)
-                print("👇Pressed E to give plant")
-                pyautogui.press('e')
-
-                window.showNormal()
-                window.raise_()
-                window.activateWindow()
-                QtCore.QThread.msleep(500)
-
-                for i in range(WAIT_TIME):
-                    if bot_stop_event.is_set():
-                        status_label.setText("Bot stopped.")
-                        return
-                    status_label.setText(f"Waiting {WAIT_TIME - i}s...")
-                    time.sleep(1)
-
-                focus_game_window()
-                pyautogui.click()
-                print("👇Pressed E to extract the honey")
-                pyautogui.press('e')
-
-                if bot_stop_event.is_set():
-                    status_label.setText("Bot stopped.")
-                    return
-
-                window.hide()
-                status_label.setText("Cycle complete. Restarting...")
-                time.sleep(1)
-            else:
-                for i in range(10, 0, -1):
-                    if bot_stop_event.is_set():
-                        status_label.setText("Bot stopped.")
-                        return
-                    status_label.setText(f"No item. Retrying in {i}s...")
-                    time.sleep(1)
-        except Exception as e:
-            print(f"Error in run_bot loop: {e}")
-            bot_running = False
-            status_label.setText(f"Error occurred: {e}")
-            return
-
-def delayed_start(status_label, window, start_button, pick_button, stop_button, window_keyword):
-    for i in range(5, 0, -1):
-        status_label.setText(f"Bot starting in {i}s...")
-        time.sleep(1)
-    window.hide()
-    run_bot(status_label, window, window_keyword)
-
-# === GUI ===
 class BotWindow(QtWidgets.QWidget):
     update_status_signal = pyqtSignal(str)
+    hide_window_signal = pyqtSignal()
+    show_window_signal = pyqtSignal()
+    raise_window_signal = pyqtSignal()
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Grow Garden Honey Bot")
@@ -176,7 +121,14 @@ class BotWindow(QtWidgets.QWidget):
         layout.addWidget(self.stop_button)
         self.setLayout(layout)
         
+        # Connect signals
         self.update_status_signal.connect(self.status_label.setText)
+        self.hide_window_signal.connect(self.hide)
+        self.show_window_signal.connect(self.showNormal)
+        self.raise_window_signal.connect(self.raise_)
+
+        # Store bot thread for control
+        self.bot_thread = None
 
     def pick_position(self):
         global START_X, START_Y, position_selected
@@ -192,7 +144,6 @@ class BotWindow(QtWidgets.QWidget):
                 )
                 self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
 
-                # Combine all screen geometries into one bounding QRect
                 screens = QtWidgets.QApplication.screens()
                 desktop_rect = screens[0].geometry()
                 for screen in screens[1:]:
@@ -204,8 +155,7 @@ class BotWindow(QtWidgets.QWidget):
 
                 label = QtWidgets.QLabel("Click anywhere to pick the position", self)
                 label.setStyleSheet("color: white; font-size: 24px; background-color: rgba(0, 0, 0, 128);")
-                label.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
-                label.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+                label.setAlignment(QtCore.Qt.AlignCenter)
 
                 layout = QtWidgets.QVBoxLayout(self)
                 layout.setContentsMargins(0, 0, 0, 0)
@@ -234,7 +184,6 @@ class BotWindow(QtWidgets.QWidget):
         self.overlay.show()
         self.overlay.raise_()
 
-
     def start_bot(self):
         global bot_running, bot_stop_event, position_selected
 
@@ -251,6 +200,8 @@ class BotWindow(QtWidgets.QWidget):
             self.pick_button.hide()
             self.stop_button.show()
 
+            print("✅ UI updated")
+
             self.raise_()
             QtCore.QTimer.singleShot(500, self.raise_)
 
@@ -258,18 +209,91 @@ class BotWindow(QtWidgets.QWidget):
             if not window_keyword:
                 window_keyword = "Grow"
 
-            QtCore.QTimer.singleShot(1000, lambda: focus_game_window(window_keyword))
-
-            threading.Thread(
-                target=delayed_start,
-                args=(self.status_label, self, self.start_button, self.pick_button, self.stop_button, window_keyword),
+            print(f"✅ Ready to start thread")
+            self.bot_thread = threading.Thread(
+                target=self.delayed_start,
+                args=(window_keyword,),
                 daemon=True
-            ).start()
+            )
+            self.bot_thread.start()
+
+    def delayed_start(self, window_keyword):
+        print("Thread was started")
+        for i in range(5, 0, -1):
+            if bot_stop_event.is_set():
+                self.update_status_signal.emit("Bot stopped before start.")
+                return
+            self.update_status_signal.emit(f"Bot starting in {i}s...")
+            time.sleep(1)
+
+        if bot_stop_event.is_set():
+            self.update_status_signal.emit("Bot stopped before focus.")
+            return
+
+        focus_game_window(window_keyword)
+        self.hide_window_signal.emit()
+        self.run_bot(window_keyword)
+
+    def run_bot(self, window_keyword):
+        global bot_running
+        while bot_running and not bot_stop_event.is_set():
+            try:
+                print(f"👉 Using START_X={START_X}, START_Y={START_Y}")
+                item_pos = find_valid_item()
+                if item_pos:
+                    self.update_status_signal.emit("Clicking item and pressing E twice to give plant...")
+                    pyautogui.click(item_pos)
+                    time.sleep(0.3)
+                    pyautogui.press('e')
+                    print("👇Pressed E twice to give plant")
+
+                    self.update_status_signal.emit("Waiting 30s with bot window on top...")
+                    self.show_window_signal.emit()
+                    self.raise_window_signal.emit()
+
+                    for i in range(WAIT_TIME):
+                        if bot_stop_event.is_set():
+                            self.update_status_signal.emit("Bot stopped.")
+                            return
+                        self.update_status_signal.emit(f"Waiting {WAIT_TIME - i}s...")
+                        time.sleep(1)
+
+                    if bot_stop_event.is_set():
+                        self.update_status_signal.emit("Bot stopped before extracting honey.")
+                        return
+
+                    focus_game_window(window_keyword)
+                    pyautogui.click()  # to focus game window
+                    pyautogui.press('e')
+                    print("👇Pressed E to extract the honey")
+
+                    self.update_status_signal.emit("Cycle complete. Bot window on top.")
+
+                    time.sleep(1)
+                else:
+                    for i in range(10, 0, -1):
+                        if bot_stop_event.is_set():
+                            self.update_status_signal.emit("Bot stopped.")
+                            return
+                        self.update_status_signal.emit(f"No item. Retrying in {i}s...")
+                        time.sleep(1)
+            except Exception as e:
+                print(f"Error in run_bot loop: {e}")
+                bot_running = False
+                self.update_status_signal.emit(f"Error occurred: {e}")
+                return
 
     def stop_bot(self):
         global bot_running, bot_stop_event
         bot_running = False
         bot_stop_event.set()
+
+        self.status_label.setText("Stopping bot, please wait...")
+
+        # Wait for the thread to finish, with timeout so UI doesn't freeze
+        if self.bot_thread and self.bot_thread.is_alive():
+            self.bot_thread.join(timeout=2)
+
         self.status_label.setText("Bot stopped.")
 
         self.start_button.show()
@@ -283,7 +307,6 @@ class BotWindow(QtWidgets.QWidget):
         self.stop_bot()
         event.accept()
 
-# === RUN ===
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
     window = BotWindow()
